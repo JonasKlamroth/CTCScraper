@@ -143,6 +143,7 @@ fun PuzzleInfoCard(
     onDelete: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     Box(modifier = modifier) {
         Card(
@@ -190,6 +191,14 @@ fun PuzzleInfoCard(
             onDismissRequest = { showMenu = false }
         ) {
             DropdownMenuItem(
+                text = { Text("Watch on YouTube") },
+                onClick = {
+                    val intent = Intent(Intent.ACTION_VIEW, puzzle.videoUrl.toUri())
+                    context.startActivity(intent)
+                    showMenu = false
+                }
+            )
+            DropdownMenuItem(
                 text = { Text("Delete") },
                 onClick = {
                     onDelete()
@@ -209,6 +218,7 @@ fun PuzzleListPreview() {
         thumbnailUrl = "",
         videoLength = 930,
         published = "2026-01-09T13:45:00+00:00",
+        videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         isOpened = true
     )
     CTCScraperTheme {

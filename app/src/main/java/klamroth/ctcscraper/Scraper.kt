@@ -20,6 +20,7 @@ data class PuzzleInfo(
     val thumbnailUrl: String,
     val videoLength: Int,
     val published: String,
+    val videoUrl: String = "",
     val isDeleted: Boolean = false,
     val isOpened: Boolean = false
 )
@@ -52,7 +53,14 @@ class Scraper {
 
                         if (initialSudokuPadLink != null && videoLength != null) {
                             val deeplink = getSudokuPadDeeplink(initialSudokuPadLink)
-                            PuzzleInfo(title, deeplink, thumbnailUrl, videoLength, published)
+                            PuzzleInfo(
+                                title = title,
+                                sudokuPadLink = deeplink,
+                                thumbnailUrl = thumbnailUrl,
+                                videoLength = videoLength,
+                                published = published,
+                                videoUrl = videoUrl
+                            )
                         } else {
                             if (initialSudokuPadLink == null) Log.w(TAG, "No SudokuPad link found for '$title'")
                             if (videoLength == null) Log.w(TAG, "Could not find video length for '$title'")

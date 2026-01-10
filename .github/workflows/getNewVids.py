@@ -20,20 +20,32 @@ def get_sudoku_pad_deeplink(initial_url):
     return initial_url.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/")
 
 def get_video_length(video_url):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
     try:
-        response = requests.get(video_url)
+        response = requests.get(video_url, headers=headers, timeout=10)
         response.raise_for_status()
         html = response.text
+        print(f"Fetched HTML for {video_url}")
+        
+        # Primary method: search for lengthSeconds in the JSON blob
         regex = r'"lengthSeconds":"(\d+)"'
         match = re.search(regex, html)
         if match:
-            length = int(match.group(1))
-            if length is None:
-                print(f"No length found for {video_url}")
-                print(f"HTML: {html}")
-            return length
-        else:
             return int(match.group(1))
+            
+        # Fallback method: Search for ISO 8601 duration in meta tags (PT1M30S)
+        duration_regex = r'<meta itemprop="duration" content="PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?">'
+        duration_match = re.search(duration_regex, html)
+        if duration_match:
+            hours = int(duration_match.group(1) or 0)
+            minutes = int(duration_match.group(2) or 0)
+            seconds = int(duration_match.group(3) or 0)
+            return hours * 3600 + minutes * 60 + seconds
+
+        print(f"Warning: Could not extract length for {video_url}. Regex failed.")
     except Exception as e:
         print(f"Error fetching video length for {video_url}: {e}")
     return None
@@ -55,32 +67,43 @@ def fetch_newest_puzzles():
         
         new_puzzles = []
         for entry in entries:
-            title = entry.find('atom:title', ns).text
-            video_url = entry.find('atom:link', ns).attrib['href']
+            title_elem = entry.find('atom:title', ns)
+            title = title_elem.text if title_elem is not None else "Unknown Title"
+            
+            link_elem = entry.find('atom:link', ns)
+            video_url = link_elem.attrib['href'] if link_elem is not None else ""
             
             # media:group contains thumbnail and description
             media_group = entry.find('media:group', ns)
-            thumbnail_url = media_group.find('media:thumbnail', ns).attrib['url']
-            description = media_group.find('media:description', ns).text
-            published = entry.find('atom:published', ns).text
+            thumbnail_url = ""
+            description = ""
+            if media_group is not None:
+                thumb_elem = media_group.find('media:thumbnail', ns)
+                thumbnail_url = thumb_elem.attrib['url'] if thumb_elem is not None else ""
+                desc_elem = media_group.find('media:description', ns)
+                description = desc_elem.text if desc_elem is not None else ""
+            
+            published_elem = entry.find('atom:published', ns)
+            published = published_elem.text if published_elem is not None else ""
 
             # Extract views and rating
             views = "0"
             rating = "0"
             
             # Check for media:community/media:statistics and media:starRating
-            media_community = media_group.find('media:community', ns)
-            if media_community is not None:
-                stats = media_community.find('media:statistics', ns)
-                if stats is not None:
-                    views = stats.attrib.get('views', "0")
-                
-                star_rating = media_community.find('media:starRating', ns)
-                if star_rating is not None:
-                    rating = star_rating.attrib.get('average', "0")
+            if media_group is not None:
+                media_community = media_group.find('media:community', ns)
+                if media_community is not None:
+                    stats = media_community.find('media:statistics', ns)
+                    if stats is not None:
+                        views = stats.attrib.get('views', "0")
+                    
+                    star_rating = media_community.find('media:starRating', ns)
+                    if star_rating is not None:
+                        rating = star_rating.attrib.get('average', "0")
 
             # Fetch video length and extract links
-            video_length = get_video_length(video_url)
+            video_length = get_video_length(video_url) if video_url else None
             sudoku_pad_links = extract_sudoku_pad_links(description)
 
             if sudoku_pad_links and video_length is not None:

@@ -27,6 +27,12 @@ def get_video_length(video_url):
         regex = r'"lengthSeconds":"(\d+)"'
         match = re.search(regex, html)
         if match:
+            length = int(match.group(1))
+            if length is None:
+                print(f"No length found for {video_url}")
+                print(f"HTML: {html}")
+            return length
+        else:
             return int(match.group(1))
     except Exception as e:
         print(f"Error fetching video length for {video_url}: {e}")
@@ -82,7 +88,7 @@ def fetch_newest_puzzles():
                 puzzle = {
                     "title": title,
                     "sudokuPadLinks": deeplinks,
-                    "thumbnailUrl": thumbnailUrl,
+                    "thumbnailUrl": thumbnail_url,
                     "videoLength": video_length,
                     "published": published,
                     "videoUrl": video_url,
@@ -114,6 +120,8 @@ def download_existing_puzzles():
 def merge_and_save(new_puzzles):
     # Try to download existing puzzles first
     existing_puzzles = download_existing_puzzles()
+    if not existing_puzzles:
+        print("No existing puzzles found. Starting with an empty list.")
     
     # If download failed, try local file
     if not existing_puzzles and os.path.exists(OUTPUT_FILE):
@@ -149,6 +157,7 @@ def merge_and_save(new_puzzles):
     # Save back to file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(combined_list, f, indent=4, ensure_ascii=False)
+    print(f"Saved {len(combined_list)} puzzles to {OUTPUT_FILE}")
     
     print(f"Successfully merged. Added {added_count} new entries. Total: {len(combined_list)}")
 

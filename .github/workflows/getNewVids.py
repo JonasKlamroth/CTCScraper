@@ -28,7 +28,7 @@ def get_video_length(video_url):
         response = requests.get(video_url, headers=headers, timeout=10)
         response.raise_for_status()
         html = response.text
-        print(f"Fetched HTML for {video_url}")
+        print(f"Fetched HTML for {video_url} is {html}")
         
         # Primary method: search for lengthSeconds in the JSON blob
         regex = r'"lengthSeconds":"(\d+)"'

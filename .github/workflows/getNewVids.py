@@ -7,7 +7,8 @@ import os
 # --- Configuration ---
 CTC_CHANNEL_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCC-UOdK8-mIjxBQm_ot1T-Q"
 # This URL points to the file published via GitHub Pages
-PUZZLES_URL = "https://klamroth.github.io/CTCScraper/puzzles.json"
+PUZZLES_URL = "https://jonasklamroth.github.io/CTCScraper/puzzles.json"
+
 OUTPUT_FILE = "puzzles.json"
 
 # --- Scraper Logic ---

@@ -19,37 +19,6 @@ def extract_sudoku_pad_links(description):
 def get_sudoku_pad_deeplink(initial_url):
     return initial_url.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/")
 
-def get_video_length(video_url):
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
-    try:
-        response = requests.get(video_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        html = response.text
-        print(f"Fetched HTML for {video_url} is {html}")
-        
-        # Primary method: search for lengthSeconds in the JSON blob
-        regex = r'"lengthSeconds":"(\d+)"'
-        match = re.search(regex, html)
-        if match:
-            return int(match.group(1))
-            
-        # Fallback method: Search for ISO 8601 duration in meta tags (PT1M30S)
-        duration_regex = r'<meta itemprop="duration" content="PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?">'
-        duration_match = re.search(duration_regex, html)
-        if duration_match:
-            hours = int(duration_match.group(1) or 0)
-            minutes = int(duration_match.group(2) or 0)
-            seconds = int(duration_match.group(3) or 0)
-            return hours * 3600 + minutes * 60 + seconds
-
-        print(f"Warning: Could not extract length for {video_url}. Regex failed.")
-    except Exception as e:
-        print(f"Error fetching video length for {video_url}: {e}")
-    return None
-
 def fetch_newest_puzzles():
     try:
         response = requests.get(CTC_CHANNEL_URL)
@@ -102,17 +71,15 @@ def fetch_newest_puzzles():
                     if star_rating is not None:
                         rating = star_rating.attrib.get('average', "0")
 
-            # Fetch video length and extract links
-            video_length = get_video_length(video_url) if video_url else None
+            # Extract links
             sudoku_pad_links = extract_sudoku_pad_links(description)
 
-            if sudoku_pad_links and video_length is not None:
+            if sudoku_pad_links:
                 deeplinks = [get_sudoku_pad_deeplink(link) for link in sudoku_pad_links]
                 puzzle = {
                     "title": title,
                     "sudokuPadLinks": deeplinks,
                     "thumbnailUrl": thumbnail_url,
-                    "videoLength": video_length,
                     "published": published,
                     "videoUrl": video_url,
                     "description": description,
@@ -121,10 +88,7 @@ def fetch_newest_puzzles():
                 }
                 new_puzzles.append(puzzle)
             else:
-                if not sudoku_pad_links:
-                    print(f"No SudokuPad link found for '{title}'")
-                if video_length is None:
-                    print(f"Could not find video length for '{title}'")
+                print(f"No SudokuPad link found for '{title}'")
                     
         return new_puzzles
     except Exception as e:

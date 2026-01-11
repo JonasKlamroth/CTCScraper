@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -24,7 +25,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -32,17 +35,22 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +67,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -91,6 +100,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PuzzleListScreen() {
     val context = LocalContext.current
@@ -98,23 +108,18 @@ fun PuzzleListScreen() {
     var isLoading by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf(SortOrder.DATE_DESC) }
     var filter by remember { mutableStateOf(PuzzleFilter.ALL) }
+    var searchQuery by remember { mutableStateOf("") }
+    var isSearchVisible by remember { mutableStateOf(false) }
     val scraper = remember { Scraper() }
+    val scope = rememberCoroutineScope()
     
     var selectedVideoForLinks by remember { mutableStateOf<VideoEntry?>(null) }
     val density = LocalDensity.current
 
-    LaunchedEffect(Unit) {
-        // Load cached puzzles immediately
-        val savedPuzzles = scraper.loadPuzzles(context).sortedByDescending { it.published }
-        if (savedPuzzles.isNotEmpty()) {
-            videoEntries = savedPuzzles
-        }
-
-        // Try to load new puzzles in the background
+    suspend fun refreshPuzzles() {
         isLoading = true
         val fetchedPuzzles = scraper.getNewestPuzzles()
         if (fetchedPuzzles.isNotEmpty()) {
-            // Combine existing puzzles with fetched ones, favoring existing ones to preserve state
             val combinedPuzzles = (videoEntries + fetchedPuzzles)
                 .distinctBy { it.videoUrl }
                 .sortedByDescending { it.published }
@@ -124,23 +129,35 @@ fun PuzzleListScreen() {
         }
         isLoading = false
 
-        // Fetch video length for puzzles that don't have it yet and save once finished
         fetchVideoLengths(scraper, videoEntries, onUpdate = { updatedEntry ->
             videoEntries = videoEntries.map { if (it.videoUrl == updatedEntry.videoUrl) updatedEntry else it }
         })
         scraper.savePuzzles(context, videoEntries)
     }
 
-    val filteredAndSortedEntries = remember(videoEntries, sortOrder, filter) {
+    LaunchedEffect(Unit) {
+        val savedPuzzles = scraper.loadPuzzles(context).sortedByDescending { it.published }
+        if (savedPuzzles.isNotEmpty()) {
+            videoEntries = savedPuzzles
+        }
+        refreshPuzzles()
+    }
+
+    val filteredAndSortedEntries = remember(videoEntries, sortOrder, filter, searchQuery) {
         videoEntries
             .filter { entry ->
-                when (filter) {
+                val matchesSearch = if (searchQuery.isEmpty()) true else {
+                    entry.title.contains(searchQuery, ignoreCase = true) || 
+                    entry.description.contains(searchQuery, ignoreCase = true)
+                }
+                val matchesFilter = when (filter) {
                     PuzzleFilter.ALL -> true
                     PuzzleFilter.UNSOLVED -> !entry.isAllSolved
                     PuzzleFilter.OPENED -> entry.isAnyOpened
                     PuzzleFilter.UNOPENED -> !entry.isAnyOpened
                     PuzzleFilter.SHORT_VIDEOS -> entry.videoLength in 1..1800
                 }
+                matchesSearch && matchesFilter
             }
             .let { list ->
                 when (sortOrder) {
@@ -315,6 +332,14 @@ fun PuzzleListScreen() {
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                     
+                    IconButton(onClick = { isSearchVisible = !isSearchVisible }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = if (searchQuery.isNotEmpty()) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     var showFilterMenu by remember { mutableStateOf(false) }
                     Box {
                         IconButton(onClick = { showFilterMenu = true }) {
@@ -396,51 +421,126 @@ fun PuzzleListScreen() {
                     }
                 }
             }
-            
-            PuzzleList(
-                videoEntries = filteredAndSortedEntries.filter { !it.isDeleted },
-                onVideoClick = { clickedVideo ->
-                    if (clickedVideo.puzzles.size > 1) {
-                        selectedVideoForLinks = clickedVideo
-                    } else {
-                        val puzzle = clickedVideo.puzzles.firstOrNull()
-                        if (puzzle != null) {
-                            videoEntries = videoEntries.map { video ->
-                                if (video.videoUrl == clickedVideo.videoUrl) {
-                                    video.copy(puzzles = video.puzzles.map { p ->
-                                        if (p.sudokuLink == puzzle.sudokuLink) p.copy(wasOpened = true) else p
-                                    })
-                                } else video
+
+            AnimatedVisibility(visible = isSearchVisible) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Search title or description...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear search")
                             }
-                            scraper.savePuzzles(context, videoEntries)
-                            val intent = Intent(Intent.ACTION_VIEW, puzzle.sudokuLink.toUri())
-                            context.startActivity(intent)
+                        }
+                    },
+                    singleLine = true
+                )
+            }
+
+            if (filter != PuzzleFilter.ALL || searchQuery.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (filter != PuzzleFilter.ALL) {
+                        FilterChip(
+                            selected = true,
+                            onClick = { filter = PuzzleFilter.ALL },
+                            label = { Text(filter.label) },
+                            trailingIcon = { Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        )
+                    }
+                    if (searchQuery.isNotEmpty()) {
+                        FilterChip(
+                            selected = true,
+                            onClick = { searchQuery = "" },
+                            label = { Text("Search: $searchQuery") },
+                            trailingIcon = { Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        )
+                    }
+                }
+            }
+            
+            if (filteredAndSortedEntries.isEmpty() && !isLoading) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "No puzzles match your filter or search",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                    TextButton(onClick = {
+                        filter = PuzzleFilter.ALL
+                        searchQuery = ""
+                    }) {
+                        Text("Clear All")
+                    }
+                }
+            } else {
+                PullToRefreshBox(
+                    isRefreshing = isLoading,
+                    onRefresh = {
+                        scope.launch {
+                            refreshPuzzles()
                         }
                     }
-                },
-                onDeleteVideo = { videoToDelete ->
-                    videoEntries = videoEntries.map {
-                        if (it.videoUrl == videoToDelete.videoUrl) it.copy(isDeleted = true) else it
-                    }
-                    scraper.savePuzzles(context, videoEntries)
-                },
-                onToggleOpened = { videoEntry ->
-                    videoEntries = videoEntries.map { entry ->
-                        if (entry.videoUrl == videoEntry.videoUrl) {
-                            entry.copy(puzzles = entry.puzzles.map { it.copy(wasOpened = !it.wasOpened) })
-                        } else entry
-                    }
-                    scraper.savePuzzles(context, videoEntries)
-                },
-                onToggleSolved = { videoEntry ->
-                    videoEntries = videoEntries.map { entry ->
-                        if (entry.videoUrl == videoEntry.videoUrl) {
-                            entry.copy(puzzles = entry.puzzles.map { it.copy(markedAsSolved = !it.markedAsSolved) })
-                        } else entry
-                    }
-                    scraper.savePuzzles(context, videoEntries)
+                ) {
+                    PuzzleList(
+                        videoEntries = filteredAndSortedEntries.filter { !it.isDeleted },
+                        onVideoClick = { clickedVideo ->
+                            if (clickedVideo.puzzles.size > 1) {
+                                selectedVideoForLinks = clickedVideo
+                            } else {
+                                val puzzle = clickedVideo.puzzles.firstOrNull()
+                                if (puzzle != null) {
+                                    videoEntries = videoEntries.map { video ->
+                                        if (video.videoUrl == clickedVideo.videoUrl) {
+                                            video.copy(puzzles = video.puzzles.map { p ->
+                                                if (p.sudokuLink == puzzle.sudokuLink) p.copy(wasOpened = true) else p
+                                            })
+                                        } else video
+                                    }
+                                    scraper.savePuzzles(context, videoEntries)
+                                    val intent = Intent(Intent.ACTION_VIEW, puzzle.sudokuLink.toUri())
+                                    context.startActivity(intent)
+                                }
+                            }
+                        },
+                        onDeleteVideo = { videoToDelete ->
+                            videoEntries = videoEntries.map {
+                                if (it.videoUrl == videoToDelete.videoUrl) it.copy(isDeleted = true) else it
+                            }
+                            scraper.savePuzzles(context, videoEntries)
+                        },
+                        onToggleOpened = { videoEntry ->
+                            videoEntries = videoEntries.map { entry ->
+                                if (entry.videoUrl == videoEntry.videoUrl) {
+                                    entry.copy(puzzles = entry.puzzles.map { it.copy(wasOpened = !it.wasOpened) })
+                                } else entry
+                            }
+                            scraper.savePuzzles(context, videoEntries)
+                        },
+                        onToggleSolved = { videoEntry ->
+                            videoEntries = videoEntries.map { entry ->
+                                if (entry.videoUrl == videoEntry.videoUrl) {
+                                    entry.copy(puzzles = entry.puzzles.map { it.copy(markedAsSolved = !it.markedAsSolved) })
+                                } else entry
+                            }
+                            scraper.savePuzzles(context, videoEntries)
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }

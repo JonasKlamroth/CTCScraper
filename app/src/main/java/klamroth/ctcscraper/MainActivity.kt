@@ -7,9 +7,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,7 +25,6 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -357,7 +353,7 @@ fun PuzzleListScreen() {
                             expanded = showFilterMenu,
                             onDismissRequest = { showFilterMenu = false }
                         ) {
-                            PuzzleFilter.values().forEach { option ->
+                            PuzzleFilter.entries.forEach { option ->
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -397,7 +393,7 @@ fun PuzzleListScreen() {
                             expanded = showSortMenu,
                             onDismissRequest = { showSortMenu = false }
                         ) {
-                            SortOrder.values().forEach { option ->
+                            SortOrder.entries.forEach { option ->
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -589,7 +585,6 @@ fun PuzzleList(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoEntryCard(
     videoEntry: VideoEntry,

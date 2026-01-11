@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import java.io.File
 import java.util.regex.Pattern
 
@@ -16,6 +17,7 @@ class Scraper {
     private val TAG = "Scraper"
     private val FILE_NAME = "puzzles.json"
     private val REMOTE_JSON_URL = "https://jonasklamroth.github.io/CTCScraper/puzzles.json"
+    private val CTC_FEED_URL = "https://www.youtube.com/feeds/videos.xml?channel_id=UCC-UOdK8-mIjxBQm_ot1T-Q"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -23,43 +25,106 @@ class Scraper {
     }
 
     suspend fun getNewestPuzzles(): List<VideoEntry> = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Fetching puzzles from remote JSON: $REMOTE_JSON_URL")
-            val connection = Jsoup.connect(REMOTE_JSON_URL).ignoreContentType(true).execute()
-            val jsonString = connection.body()
-            
-            // Helper class to bridge the server side script output to the local Kotlin type
-            @Serializable
-            data class PythonPuzzle(
-                val title: String,
-                val sudokuPadLinks: List<String>,
-                val thumbnailUrl: String,
-                val published: String,
-                val videoUrl: String = "",
-                val description: String = "",
-                val views: String = "0",
-                val rating: String = "0"
-            )
-
-            val remotePythonPuzzles = json.decodeFromString<List<PythonPuzzle>>(jsonString)
-            Log.d(TAG, "Successfully fetched ${remotePythonPuzzles.size} puzzles from remote.")
-            
-            remotePythonPuzzles.map { py ->
-                VideoEntry(
-                    title = py.title,
-                    puzzles = py.sudokuPadLinks.map { Puzzle(it) },
-                    thumbnailUrl = py.thumbnailUrl,
-                    published = py.published,
-                    videoUrl = py.videoUrl,
-                    description = py.description,
-                    views = py.views,
-                    rating = py.rating
-                )
-            }
+        val remoteJsonPuzzles = try {
+            fetchRemoteJsonPuzzles()
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching or parsing remote JSON.", e)
+            Log.e(TAG, "Error fetching remote JSON", e)
             emptyList()
         }
+
+        val rssPuzzles = try {
+            fetchRssPuzzles()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching RSS feed", e)
+            emptyList()
+        }
+
+        // Combine both sources, RSS first to potentially get newer data for same videoUrl
+        (rssPuzzles + remoteJsonPuzzles).distinctBy { it.videoUrl }
+    }
+
+    private fun fetchRemoteJsonPuzzles(): List<VideoEntry> {
+        Log.d(TAG, "Fetching puzzles from remote JSON: $REMOTE_JSON_URL")
+        val connection = Jsoup.connect(REMOTE_JSON_URL).ignoreContentType(true).execute()
+        val jsonString = connection.body()
+
+        @Serializable
+        data class PythonPuzzle(
+            val title: String,
+            val sudokuPadLinks: List<String>,
+            val thumbnailUrl: String,
+            val published: String,
+            val videoUrl: String = "",
+            val description: String = "",
+            val views: String = "0",
+            val rating: String = "0"
+        )
+
+        val remotePythonPuzzles = json.decodeFromString<List<PythonPuzzle>>(jsonString)
+        Log.d(TAG, "Successfully fetched ${remotePythonPuzzles.size} puzzles from remote JSON.")
+
+        return remotePythonPuzzles.map { py ->
+            VideoEntry(
+                title = py.title,
+                puzzles = py.sudokuPadLinks.map { Puzzle(it) },
+                thumbnailUrl = py.thumbnailUrl,
+                published = py.published,
+                videoUrl = py.videoUrl,
+                description = py.description,
+                views = py.views,
+                rating = py.rating
+            )
+        }
+    }
+
+    private fun fetchRssPuzzles(): List<VideoEntry> {
+        Log.d(TAG, "Fetching puzzles from RSS feed: $CTC_FEED_URL")
+        val doc = Jsoup.connect(CTC_FEED_URL).parser(Parser.xmlParser()).get()
+        val entries = doc.select("entry")
+        Log.d(TAG, "Found ${entries.size} entries in the feed.")
+
+        return entries.mapNotNull { entry ->
+            try {
+                val title = entry.select("title").text()
+                val videoUrl = entry.select("link").attr("href")
+                val published = entry.select("published").text()
+
+                val thumbnailUrl = entry.select("media|thumbnail").attr("url")
+                val description = entry.select("media|description").text()
+
+                val community = entry.select("media|community")
+                val views = community.select("media|statistics").attr("views").ifEmpty { "0" }
+                val rating = community.select("media|starRating").attr("average").ifEmpty { "0" }
+
+                val sudokuLinks = extractSudokuPadLinks(description)
+                if (sudokuLinks.isEmpty()) return@mapNotNull null
+
+                VideoEntry(
+                    title = title,
+                    puzzles = sudokuLinks.map { Puzzle(it) },
+                    thumbnailUrl = thumbnailUrl,
+                    published = published,
+                    videoUrl = videoUrl,
+                    description = description,
+                    views = views,
+                    rating = rating
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing RSS entry", e)
+                null
+            }
+        }
+    }
+
+    private fun extractSudokuPadLinks(description: String): List<String> {
+        val links = mutableListOf<String>()
+        val matcher = Pattern.compile("https://sudokupad\\.app/\\S+").matcher(description)
+        while (matcher.find()) {
+            val initialUrl = matcher.group()
+            // Convert to deeplink format as done in the Python script
+            links.add(initialUrl.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/"))
+        }
+        return links
     }
 
     suspend fun getVideoLength(videoUrl: String): Int? = withContext(Dispatchers.IO) {

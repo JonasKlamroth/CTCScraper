@@ -3,126 +3,126 @@ package klamroth.ctcscraper
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jsoup.Jsoup
-import org.jsoup.parser.Parser
 import java.io.File
+import java.util.regex.Pattern
 
 @Serializable
-data class PuzzleInfo(
+data class Puzzle(
+    val sudokuLink: String,
+    val wasOpened: Boolean = false
+)
+
+@Serializable
+data class VideoEntry(
     val title: String,
-    val sudokuPadLink: String,
+    val puzzles: List<Puzzle>,
     val thumbnailUrl: String,
-    val videoLength: Int,
     val published: String,
     val videoUrl: String = "",
-    val isDeleted: Boolean = false,
-    val isOpened: Boolean = false
-)
+    val description: String = "",
+    val views: String = "0",
+    val rating: String = "0",
+    var videoLength: Int = 0,
+    val isDeleted: Boolean = false
+) {
+    val isAnyOpened: Boolean get() = puzzles.any { it.wasOpened }
+    val isAllOpened: Boolean get() = puzzles.isNotEmpty() && puzzles.all { it.wasOpened }
+}
 
 class Scraper {
 
     private val TAG = "Scraper"
     private val FILE_NAME = "puzzles.json"
-    private val CTCChannelUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCC-UOdK8-mIjxBQm_ot1T-Q"
+    private val REMOTE_JSON_URL = "https://jonasklamroth.github.io/CTCScraper/puzzles.json"
 
-    suspend fun getNewestPuzzles(): List<PuzzleInfo> = withContext(Dispatchers.IO) {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+    }
+
+    suspend fun getNewestPuzzles(): List<VideoEntry> = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Fetching newest puzzles from RSS feed: $CTCChannelUrl")
-            val doc = Jsoup.connect(CTCChannelUrl).parser(Parser.xmlParser()).get()
+            Log.d(TAG, "Fetching puzzles from remote JSON: $REMOTE_JSON_URL")
+            val connection = Jsoup.connect(REMOTE_JSON_URL).ignoreContentType(true).execute()
+            val jsonString = connection.body()
+            
+            // Temporary helper class to bridge the old Python script output to the new Kotlin type
+            @Serializable
+            data class PythonPuzzle(
+                val title: String,
+                val sudokuPadLinks: List<String>,
+                val thumbnailUrl: String,
+                val published: String,
+                val videoUrl: String = "",
+                val description: String = "",
+                val views: String = "0",
+                val rating: String = "0"
+            )
 
-            val entries = doc.select("entry")
-            Log.d(TAG, "Found ${entries.size} entries in the feed.")
-
-            entries.map { entry ->
-                async {
-                    try {
-                        val title = entry.select("title").text()
-                        val videoUrl = entry.select("link").attr("href")
-                        val thumbnailUrl = entry.select("media|thumbnail").attr("url")
-                        val description = entry.select("media|description").text()
-                        val published = entry.select("published").text()
-
-                        val videoLength = getVideoLength(videoUrl)
-                        val initialSudokuPadLink = extractSudokuPadLink(description)
-
-                        if (initialSudokuPadLink != null && videoLength != null) {
-                            val deeplink = getSudokuPadDeeplink(initialSudokuPadLink)
-                            PuzzleInfo(
-                                title = title,
-                                sudokuPadLink = deeplink,
-                                thumbnailUrl = thumbnailUrl,
-                                videoLength = videoLength,
-                                published = published,
-                                videoUrl = videoUrl
-                            )
-                        } else {
-                            if (initialSudokuPadLink == null) Log.w(TAG, "No SudokuPad link found for '$title'")
-                            if (videoLength == null) Log.w(TAG, "Could not find video length for '$title'")
-                            null
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing entry: ${entry.select("title").text()}", e)
-                        null
-                    }
-                }
-            }.awaitAll().filterNotNull()
+            val remotePythonPuzzles = json.decodeFromString<List<PythonPuzzle>>(jsonString)
+            Log.d(TAG, "Successfully fetched ${remotePythonPuzzles.size} puzzles from remote.")
+            
+            remotePythonPuzzles.map { py ->
+                VideoEntry(
+                    title = py.title,
+                    puzzles = py.sudokuPadLinks.map { Puzzle(it) },
+                    thumbnailUrl = py.thumbnailUrl,
+                    published = py.published,
+                    videoUrl = py.videoUrl,
+                    description = py.description,
+                    views = py.views,
+                    rating = py.rating
+                )
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching or parsing RSS feed.", e)
+            Log.e(TAG, "Error fetching or parsing remote JSON.", e)
             emptyList()
         }
     }
 
-    private fun extractSudokuPadLink(description: String): String? {
-        val regex = "https://sudokupad\\.app/\\S+".toRegex()
-        return regex.find(description)?.value
-    }
-
-    private fun getVideoLength(videoUrl: String): Int? {
-        return try {
+    suspend fun getVideoLength(videoUrl: String): Int? = withContext(Dispatchers.IO) {
+        if (videoUrl.isEmpty()) return@withContext null
+        return@withContext try {
             Log.d(TAG, "Fetching video page for length: $videoUrl")
             val videoDoc = Jsoup.connect(videoUrl).get()
             val html = videoDoc.html()
-            val regex = "\"lengthSeconds\":\"(\\d+)\"".toRegex()
-            val match = regex.find(html)?.groups?.get(1)?.value
-            val length = match?.toIntOrNull()
-            if (length != null) {
+            val regex = Pattern.compile("\"lengthSeconds\":\"(\\d+)\"")
+            val matcher = regex.matcher(html)
+            if (matcher.find()) {
+                val length = matcher.group(1)?.toIntOrNull()
                 Log.d(TAG, "Found video length: $length seconds for $videoUrl")
+                length
             } else {
                 Log.w(TAG, "Could not extract video length from $videoUrl")
+                null
             }
-            length
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching video length from $videoUrl", e)
             null
         }
     }
 
-    private fun getSudokuPadDeeplink(initialUrl: String): String {
-        return initialUrl.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/")
-    }
-
-    fun savePuzzles(context: Context, puzzles: List<PuzzleInfo>) {
+    fun savePuzzles(context: Context, puzzles: List<VideoEntry>) {
         try {
-            val json = Json.encodeToString(puzzles)
-            File(context.filesDir, FILE_NAME).writeText(json)
+            val jsonString = Json.encodeToString(puzzles)
+            File(context.filesDir, FILE_NAME).writeText(jsonString)
             Log.d(TAG, "Successfully saved ${puzzles.size} puzzles to disk.")
         } catch (e: Exception) {
             Log.e(TAG, "Error saving puzzles to disk", e)
         }
     }
 
-    fun loadPuzzles(context: Context): List<PuzzleInfo> {
+    fun loadPuzzles(context: Context): List<VideoEntry> {
         val file = File(context.filesDir, FILE_NAME)
         if (!file.exists()) return emptyList()
         return try {
-            val json = file.readText()
-            Json.decodeFromString<List<PuzzleInfo>>(json)
+            val jsonString = file.readText()
+            json.decodeFromString<List<VideoEntry>>(jsonString)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading puzzles from disk", e)
             emptyList()

@@ -14,18 +14,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -51,8 +59,25 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Locale
+
+enum class SortOrder(val label: String) {
+    DATE_DESC("Date (Newest)"),
+    DATE_ASC("Date (Oldest)"),
+    TITLE_ASC("Title (A-Z)"),
+    TITLE_DESC("Title (Z-A)"),
+    LENGTH_DESC("Length (Longest)"),
+    LENGTH_ASC("Length (Shortest)")
+}
+
+enum class PuzzleFilter(val label: String) {
+    ALL("All"),
+    UNSOLVED("Unsolved"),
+    OPENED("Opened"),
+    UNOPENED("Unopened"),
+    SHORT_VIDEOS("Short Videos <30min")
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +96,8 @@ fun PuzzleListScreen() {
     val context = LocalContext.current
     var videoEntries by remember { mutableStateOf(emptyList<VideoEntry>()) }
     var isLoading by remember { mutableStateOf(false) }
+    var sortOrder by remember { mutableStateOf(SortOrder.DATE_DESC) }
+    var filter by remember { mutableStateOf(PuzzleFilter.ALL) }
     val scraper = remember { Scraper() }
     
     var selectedVideoForLinks by remember { mutableStateOf<VideoEntry?>(null) }
@@ -102,6 +129,29 @@ fun PuzzleListScreen() {
             videoEntries = videoEntries.map { if (it.videoUrl == updatedEntry.videoUrl) updatedEntry else it }
         })
         scraper.savePuzzles(context, videoEntries)
+    }
+
+    val filteredAndSortedEntries = remember(videoEntries, sortOrder, filter) {
+        videoEntries
+            .filter { entry ->
+                when (filter) {
+                    PuzzleFilter.ALL -> true
+                    PuzzleFilter.UNSOLVED -> !entry.isAllSolved
+                    PuzzleFilter.OPENED -> entry.isAnyOpened
+                    PuzzleFilter.UNOPENED -> !entry.isAnyOpened
+                    PuzzleFilter.SHORT_VIDEOS -> entry.videoLength in 1..1800
+                }
+            }
+            .let { list ->
+                when (sortOrder) {
+                    SortOrder.DATE_DESC -> list.sortedByDescending { it.published }
+                    SortOrder.DATE_ASC -> list.sortedBy { it.published }
+                    SortOrder.TITLE_ASC -> list.sortedBy { it.title }
+                    SortOrder.TITLE_DESC -> list.sortedByDescending { it.title }
+                    SortOrder.LENGTH_DESC -> list.sortedByDescending { it.videoLength }
+                    SortOrder.LENGTH_ASC -> list.sortedBy { it.videoLength }
+                }
+            }
     }
 
     if (selectedVideoForLinks != null) {
@@ -255,17 +305,100 @@ fun PuzzleListScreen() {
                     text = "Latest Puzzles",
                     style = MaterialTheme.typography.headlineMedium
                 )
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    
+                    var showFilterMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { showFilterMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Default.FilterList,
+                                contentDescription = "Filter",
+                                tint = if (filter != PuzzleFilter.ALL) {
+                                    Color(0xFF4CAF50) // Bright Green
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showFilterMenu,
+                            onDismissRequest = { showFilterMenu = false }
+                        ) {
+                            PuzzleFilter.values().forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = option.label,
+                                                color = if (filter == option) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (filter == option) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("•", color = Color(0xFF4CAF50))
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        filter = option
+                                        showFilterMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    var showSortMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort",
+                                tint = if (sortOrder != SortOrder.DATE_DESC) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            SortOrder.values().forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = option.label,
+                                                color = if (sortOrder == option) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (sortOrder == option) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("•", color = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        sortOrder = option
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
             
             PuzzleList(
-                videoEntries = videoEntries.filter { !it.isDeleted },
+                videoEntries = filteredAndSortedEntries.filter { !it.isDeleted },
                 onVideoClick = { clickedVideo ->
                     if (clickedVideo.puzzles.size > 1) {
                         selectedVideoForLinks = clickedVideo
@@ -415,14 +548,16 @@ fun VideoEntryCard(
                             val minutes = videoEntry.videoLength / 60
                             val seconds = videoEntry.videoLength % 60
                             Text(
-                                text = String.format("%d:%02d", minutes, seconds),
+                                text = String.format(Locale.getDefault(), "%d:%02d", minutes, seconds),
                                 style = MaterialTheme.typography.bodySmall
                             )
                         }
                         
                         val formattedDate = try {
-                            val zdt = ZonedDateTime.parse(videoEntry.published)
-                            zdt.format(DateTimeFormatter.ofPattern("MMM dd, yyyy"))
+                            val inputFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+                            val outputFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                            val date = inputFormat.parse(videoEntry.published)
+                            if (date != null) outputFormat.format(date) else videoEntry.published
                         } catch (e: Exception) {
                             videoEntry.published
                         }

@@ -89,19 +89,20 @@ class Scraper {
                 val videoUrl = entry.select("link").attr("href")
                 val published = entry.select("published").text()
 
-                val thumbnailUrl = entry.select("media|thumbnail").attr("url")
-                val description = entry.select("media|description").text()
+                val mediaGroup = entry.select("media|group")
+                val thumbnailUrl = mediaGroup.select("media|thumbnail").attr("url")
+                val description = mediaGroup.select("media|description").text()
 
-                val community = entry.select("media|community")
+                val community = mediaGroup.select("media|community")
                 val views = community.select("media|statistics").attr("views").ifEmpty { "0" }
                 val rating = community.select("media|starRating").attr("average").ifEmpty { "0" }
 
-                val sudokuLinks = extractSudokuPadLinks(description)
-                if (sudokuLinks.isEmpty()) return@mapNotNull null
+                val puzzles = extractSudokuPuzzles(description)
+                if (puzzles.isEmpty()) return@mapNotNull null
 
                 VideoEntry(
                     title = title,
-                    puzzles = sudokuLinks.map { Puzzle(it) },
+                    puzzles = puzzles,
                     thumbnailUrl = thumbnailUrl,
                     published = published,
                     videoUrl = videoUrl,
@@ -116,15 +117,34 @@ class Scraper {
         }
     }
 
-    private fun extractSudokuPadLinks(description: String): List<String> {
-        val links = mutableListOf<String>()
+    private fun extractSudokuPuzzles(description: String): List<Puzzle> {
+        val puzzles = mutableListOf<Puzzle>()
         val matcher = Pattern.compile("https://sudokupad\\.app/\\S+").matcher(description)
+        
         while (matcher.find()) {
             val initialUrl = matcher.group()
-            // Convert to deeplink format as done in the Python script
-            links.add(initialUrl.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/"))
+            var puzzleName = ""
+            var puzzleAuthor = ""
+            
+            // Scrape the title from the original link
+            try {
+                Log.d(TAG, "Scraping SudokuPad link for title: $initialUrl")
+                val doc = Jsoup.connect(initialUrl).get()
+                val title = doc.title()
+                val authorAndTitle = title.split(" by ")
+                puzzleName = authorAndTitle[0].trim()
+                puzzleAuthor = authorAndTitle[1].replace(Regex("\\(Sven.*\\)"), "").trim()
+                Log.d(TAG, "Extracted title: $puzzleName")
+                Log.d(TAG, "Extracted author: $puzzleAuthor")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to scrape HTML title for $initialUrl", e)
+            }
+
+            // Convert to deeplink format
+            val deeplink = initialUrl.replace("sudokupad.app/", "sudokupad.svencodes.com/puzzle/")
+            puzzles.add(Puzzle(sudokuLink = deeplink, name = puzzleName, author = puzzleAuthor))
         }
-        return links
+        return puzzles
     }
 
     suspend fun getVideoLength(videoUrl: String): Int? = withContext(Dispatchers.IO) {

@@ -223,12 +223,20 @@ fun PuzzleListScreen() {
                                         .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val label = if (puzzle.name.isNotEmpty()) puzzle.name else "Sudoku ${index + 1}"
-                                    Text(
-                                        text = label,
-                                        modifier = Modifier.weight(1f),
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val label = if (puzzle.name.isNotEmpty()) puzzle.name else "Sudoku ${index + 1}"
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        if (puzzle.author.isNotEmpty()) {
+                                            Text(
+                                                text = "by " + puzzle.author,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
                                     if (puzzle.wasOpened) {
                                         Text(
                                             text = "✓",
@@ -633,10 +641,21 @@ fun VideoEntryCard(
                         .padding(start = 16.dp)
                         .weight(1f)
                 ) {
-                    Text(
-                        text = videoEntry.title,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = videoEntry.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (videoEntry.puzzles.size > 1) {
+                            Text(
+                                text = "❐",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.padding(horizontal = 4.dp)
+                            )
+                        }
+                    }
                     
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (videoEntry.videoLength > 0) {

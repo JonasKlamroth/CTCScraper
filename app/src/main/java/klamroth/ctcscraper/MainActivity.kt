@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,8 +39,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import klamroth.ctcscraper.ui.theme.CTCScraperTheme
@@ -69,6 +74,7 @@ fun PuzzleListScreen() {
     val scraper = remember { Scraper() }
     
     var selectedVideoForLinks by remember { mutableStateOf<VideoEntry?>(null) }
+    val density = LocalDensity.current
 
     LaunchedEffect(Unit) {
         // Load cached puzzles immediately
@@ -105,37 +111,124 @@ fun PuzzleListScreen() {
             title = { Text("Select Puzzle") },
             text = {
                 Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp, end = 12.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(text = "Solved", style = MaterialTheme.typography.labelMedium)
+                    }
                     currentVideo.puzzles.forEachIndexed { index, puzzle ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    videoEntries = videoEntries.map { video ->
-                                        if (video.videoUrl == currentVideo.videoUrl) {
-                                            video.copy(puzzles = video.puzzles.map { p ->
-                                                if (p.sudokuLink == puzzle.sudokuLink) p.copy(wasOpened = true) else p
-                                            })
-                                        } else video
+                        Box {
+                            var showPuzzleMenu by remember { mutableStateOf(false) }
+                            var puzzleMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .pointerInput(Unit) {
+                                            detectTapGestures(
+                                                onLongPress = { tapOffset ->
+                                                    puzzleMenuOffset = DpOffset(
+                                                        with(density) { tapOffset.x.toDp() },
+                                                        with(density) { tapOffset.y.toDp() }
+                                                    )
+                                                    showPuzzleMenu = true
+                                                },
+                                                onTap = {
+                                                    videoEntries = videoEntries.map { video ->
+                                                        if (video.videoUrl == currentVideo.videoUrl) {
+                                                            video.copy(puzzles = video.puzzles.map { p ->
+                                                                if (p.sudokuLink == puzzle.sudokuLink) p.copy(wasOpened = true) else p
+                                                            })
+                                                        } else video
+                                                    }
+                                                    scraper.savePuzzles(context, videoEntries)
+                                                    val intent = Intent(Intent.ACTION_VIEW, puzzle.sudokuLink.toUri())
+                                                    context.startActivity(intent)
+                                                    selectedVideoForLinks = null
+                                                }
+                                            )
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val label = if (puzzle.name.isNotEmpty()) puzzle.name else "Sudoku ${index + 1}"
+                                    Text(
+                                        text = label,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    if (puzzle.wasOpened) {
+                                        Text(
+                                            text = "✓",
+                                            color = Color(0xFF4CAF50),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                        )
                                     }
-                                    scraper.savePuzzles(context, videoEntries)
-                                    val intent = Intent(Intent.ACTION_VIEW, puzzle.sudokuLink.toUri())
-                                    context.startActivity(intent)
-                                    selectedVideoForLinks = null
                                 }
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Puzzle ${index + 1}",
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            if (puzzle.wasOpened) {
-                                Text(
-                                    text = "✓",
-                                    color = Color(0xFF4CAF50),
-                                    style = MaterialTheme.typography.bodyLarge
+                                Checkbox(
+                                    checked = puzzle.markedAsSolved,
+                                    onCheckedChange = { isChecked ->
+                                        videoEntries = videoEntries.map { video ->
+                                            if (video.videoUrl == currentVideo.videoUrl) {
+                                                video.copy(puzzles = video.puzzles.map { p ->
+                                                    if (p.sudokuLink == puzzle.sudokuLink) p.copy(markedAsSolved = isChecked) else p
+                                                })
+                                            } else video
+                                        }
+                                        scraper.savePuzzles(context, videoEntries)
+                                        // Update the dialog state
+                                        selectedVideoForLinks = videoEntries.find { it.videoUrl == currentVideo.videoUrl }
+                                    }
                                 )
+                            }
+
+                            Box(modifier = Modifier.align(Alignment.TopStart).size(0.dp)) {
+                                DropdownMenu(
+                                    expanded = showPuzzleMenu,
+                                    onDismissRequest = { showPuzzleMenu = false },
+                                    offset = puzzleMenuOffset
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(if (puzzle.wasOpened) "Mark as Unopened" else "Mark as Opened") },
+                                        onClick = {
+                                            videoEntries = videoEntries.map { video ->
+                                                if (video.videoUrl == currentVideo.videoUrl) {
+                                                    video.copy(puzzles = video.puzzles.map { p ->
+                                                        if (p.sudokuLink == puzzle.sudokuLink) p.copy(wasOpened = !p.wasOpened) else p
+                                                    })
+                                                } else video
+                                            }
+                                            scraper.savePuzzles(context, videoEntries)
+                                            selectedVideoForLinks = videoEntries.find { it.videoUrl == currentVideo.videoUrl }
+                                            showPuzzleMenu = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(if (puzzle.markedAsSolved) "Mark as Unsolved" else "Mark as Solved") },
+                                        onClick = {
+                                            videoEntries = videoEntries.map { video ->
+                                                if (video.videoUrl == currentVideo.videoUrl) {
+                                                    video.copy(puzzles = video.puzzles.map { p ->
+                                                        if (p.sudokuLink == puzzle.sudokuLink) p.copy(markedAsSolved = !p.markedAsSolved) else p
+                                                    })
+                                                } else video
+                                            }
+                                            scraper.savePuzzles(context, videoEntries)
+                                            selectedVideoForLinks = videoEntries.find { it.videoUrl == currentVideo.videoUrl }
+                                            showPuzzleMenu = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -143,7 +236,7 @@ fun PuzzleListScreen() {
             },
             confirmButton = {
                 TextButton(onClick = { selectedVideoForLinks = null }) {
-                    Text("Cancel")
+                    Text("Close")
                 }
             }
         )
@@ -197,6 +290,22 @@ fun PuzzleListScreen() {
                         if (it.videoUrl == videoToDelete.videoUrl) it.copy(isDeleted = true) else it
                     }
                     scraper.savePuzzles(context, videoEntries)
+                },
+                onToggleOpened = { videoEntry ->
+                    videoEntries = videoEntries.map { entry ->
+                        if (entry.videoUrl == videoEntry.videoUrl) {
+                            entry.copy(puzzles = entry.puzzles.map { it.copy(wasOpened = !it.wasOpened) })
+                        } else entry
+                    }
+                    scraper.savePuzzles(context, videoEntries)
+                },
+                onToggleSolved = { videoEntry ->
+                    videoEntries = videoEntries.map { entry ->
+                        if (entry.videoUrl == videoEntry.videoUrl) {
+                            entry.copy(puzzles = entry.puzzles.map { it.copy(markedAsSolved = !it.markedAsSolved) })
+                        } else entry
+                    }
+                    scraper.savePuzzles(context, videoEntries)
                 }
             )
         }
@@ -223,7 +332,9 @@ fun PuzzleList(
     videoEntries: List<VideoEntry>,
     modifier: Modifier = Modifier,
     onVideoClick: (VideoEntry) -> Unit = {},
-    onDeleteVideo: (VideoEntry) -> Unit = {}
+    onDeleteVideo: (VideoEntry) -> Unit = {},
+    onToggleOpened: (VideoEntry) -> Unit = {},
+    onToggleSolved: (VideoEntry) -> Unit = {}
 ) {
     if (videoEntries.isEmpty()) {
         Column(modifier = modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -236,7 +347,9 @@ fun PuzzleList(
                     videoEntry = entry,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     onClick = { onVideoClick(entry) },
-                    onDelete = { onDeleteVideo(entry) }
+                    onDelete = { onDeleteVideo(entry) },
+                    onToggleOpened = { onToggleOpened(entry) },
+                    onToggleSolved = { onToggleSolved(entry) }
                 )
             }
         }
@@ -249,23 +362,36 @@ fun VideoEntryCard(
     videoEntry: VideoEntry,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
-    onDelete: () -> Unit = {}
+    onDelete: () -> Unit = {},
+    onToggleOpened: () -> Unit = {},
+    onToggleSolved: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var pressOffset by remember { mutableStateOf(DpOffset.Zero) }
+    val density = LocalDensity.current
     val context = LocalContext.current
 
-    Box(modifier = modifier) {
+    Box(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = { tapOffset ->
+                        pressOffset = DpOffset(
+                            with(density) { tapOffset.x.toDp() },
+                            with(density) { tapOffset.y.toDp() }
+                        )
+                        showMenu = true
+                    },
+                    onTap = { onClick() }
+                )
+            }
+    ) {
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { showMenu = true }
-                ),
+            modifier = Modifier.fillMaxWidth(),
             border = when {
-                !videoEntry.isAnyOpened -> null
                 videoEntry.isAllOpened -> BorderStroke(2.dp, Color(0xFF4CAF50))
-                else -> BorderStroke(2.dp, Color.Yellow)
+                videoEntry.isAnyOpened -> BorderStroke(2.dp, Color.Yellow)
+                else -> null
             }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
@@ -274,7 +400,11 @@ fun VideoEntryCard(
                     contentDescription = videoEntry.title,
                     modifier = Modifier.size(120.dp, 68.dp)
                 )
-                Column(modifier = Modifier.padding(start = 16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .padding(start = 16.dp)
+                        .weight(1f)
+                ) {
                     Text(
                         text = videoEntry.title,
                         style = MaterialTheme.typography.titleMedium,
@@ -299,27 +429,66 @@ fun VideoEntryCard(
                         Text(text = formattedDate, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                if (videoEntry.isAllSolved) {
+                    Text(
+                        text = "✓",
+                        color = Color(0xFF4CAF50),
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
             }
         }
-        DropdownMenu(
-            expanded = showMenu,
-            onDismissRequest = { showMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Watch on YouTube") },
-                onClick = {
-                    val intent = Intent(Intent.ACTION_VIEW, videoEntry.videoUrl.toUri())
-                    context.startActivity(intent)
-                    showMenu = false
+        
+        // This tiny anchor ensures the DropdownMenu positions itself correctly relative to the touch point
+        Box(modifier = Modifier.align(Alignment.TopStart).size(0.dp)) {
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                offset = pressOffset
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Watch on YouTube") },
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, videoEntry.videoUrl.toUri())
+                        context.startActivity(intent)
+                        showMenu = false
+                    }
+                )
+                if (videoEntry.puzzles.size > 1) {
+                    DropdownMenuItem(
+                        text = { Text("Select Puzzle") },
+                        onClick = {
+                            onClick()
+                            showMenu = false
+                        }
+                    )
                 }
-            )
-            DropdownMenuItem(
-                text = { Text("Delete") },
-                onClick = {
-                    onDelete()
-                    showMenu = false
+                if (videoEntry.puzzles.size == 1) {
+                    val puzzle = videoEntry.puzzles[0]
+                    DropdownMenuItem(
+                        text = { Text(if (puzzle.wasOpened) "Mark as Unopened" else "Mark as Opened") },
+                        onClick = {
+                            onToggleOpened()
+                            showMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (puzzle.markedAsSolved) "Mark as Unsolved" else "Mark as Solved") },
+                        onClick = {
+                            onToggleSolved()
+                            showMenu = false
+                        }
+                    )
                 }
-            )
+                DropdownMenuItem(
+                    text = { Text("Delete") },
+                    onClick = {
+                        onDelete()
+                        showMenu = false
+                    }
+                )
+            }
         }
     }
 }
@@ -329,7 +498,7 @@ fun VideoEntryCard(
 fun PuzzleListPreview() {
     val sampleEntry = VideoEntry(
         title = "The Miracle Sudoku",
-        puzzles = listOf(Puzzle("https://sudokupad.app/some-puzzle-id", wasOpened = true)),
+        puzzles = listOf(Puzzle("https://sudokupad.app/some-puzzle-id", wasOpened = true, markedAsSolved = true)),
         thumbnailUrl = "",
         videoLength = 930,
         published = "2026-01-09T13:45:00+00:00",

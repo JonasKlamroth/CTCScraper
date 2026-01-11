@@ -14,7 +14,9 @@ import java.util.regex.Pattern
 @Serializable
 data class Puzzle(
     val sudokuLink: String,
-    val wasOpened: Boolean = false
+    val name: String = "",
+    val wasOpened: Boolean = false,
+    val markedAsSolved: Boolean = false
 )
 
 @Serializable
@@ -32,6 +34,8 @@ data class VideoEntry(
 ) {
     val isAnyOpened: Boolean get() = puzzles.any { it.wasOpened }
     val isAllOpened: Boolean get() = puzzles.isNotEmpty() && puzzles.all { it.wasOpened }
+    val isAnySolved: Boolean get() = puzzles.any { it.markedAsSolved }
+    val isAllSolved: Boolean get() = puzzles.isNotEmpty() && puzzles.all { it.markedAsSolved }
 }
 
 class Scraper {

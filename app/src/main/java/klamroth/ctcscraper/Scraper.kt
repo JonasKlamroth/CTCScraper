@@ -11,33 +11,6 @@ import org.jsoup.Jsoup
 import java.io.File
 import java.util.regex.Pattern
 
-@Serializable
-data class Puzzle(
-    val sudokuLink: String,
-    val name: String = "",
-    val wasOpened: Boolean = false,
-    val markedAsSolved: Boolean = false
-)
-
-@Serializable
-data class VideoEntry(
-    val title: String,
-    val puzzles: List<Puzzle>,
-    val thumbnailUrl: String,
-    val published: String,
-    val videoUrl: String = "",
-    val description: String = "",
-    val views: String = "0",
-    val rating: String = "0",
-    var videoLength: Int = 0,
-    val isDeleted: Boolean = false
-) {
-    val isAnyOpened: Boolean get() = puzzles.any { it.wasOpened }
-    val isAllOpened: Boolean get() = puzzles.isNotEmpty() && puzzles.all { it.wasOpened }
-    val isAnySolved: Boolean get() = puzzles.any { it.markedAsSolved }
-    val isAllSolved: Boolean get() = puzzles.isNotEmpty() && puzzles.all { it.markedAsSolved }
-}
-
 class Scraper {
 
     private val TAG = "Scraper"
@@ -55,7 +28,7 @@ class Scraper {
             val connection = Jsoup.connect(REMOTE_JSON_URL).ignoreContentType(true).execute()
             val jsonString = connection.body()
             
-            // Temporary helper class to bridge the old Python script output to the new Kotlin type
+            // Helper class to bridge the server side script output to the local Kotlin type
             @Serializable
             data class PythonPuzzle(
                 val title: String,

@@ -2,7 +2,7 @@ name: Scrape YouTube Feed
 
 on:
   schedule:
-    - cron: '0 0 */5 * *' # Run every 5 days
+    - cron: '0 0 */1 * *' # Run every 5 days
   workflow_dispatch: # Allow manual trigger
 
 permissions:
